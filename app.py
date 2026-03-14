@@ -1,9 +1,9 @@
 
 from datetime import datetime as dt
+from langgraph.graph import StateGraph, END
 from langchain.tools import tool
 from langchain_community.vectorstores import FAISS
 from langchain_core.output_parsers import PydanticOutputParser
-from langgraph.graph import StateGraph, END
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_mistralai import ChatMistralAI
 from pydantic import BaseModel, Field
@@ -12,13 +12,11 @@ import base64
 import os
 import streamlit as st
 
-
-# ==========================================
-# 🎨 1. CONFIGURATION DE LA PAGE STREAMLIT
-# ==========================================
+# =======================================
+# 1. CONFIGURATION DE LA PAGE STREAMLIT
+# =======================================
 st.set_page_config(page_title="Le conseiller enneigé", page_icon="pioupiou.jpg", layout="centered")
 
-# --- FONCTION POUR INJECTER LES IMAGES FIXES (Avec Cache !) ---
 @st.cache_data
 def get_base64_image(image_path):
     try:
@@ -33,8 +31,6 @@ nom_image_droite = "photo_droite.jpg"
 img_left_base64 = get_base64_image(nom_image_gauche)
 img_right_base64 = get_base64_image(nom_image_droite)
 
-# --- INJECTION DU CODE CSS CORRIGÉ ---
-# --- INJECTION DU CODE CSS (Technique du Background Image) ---
 if img_left_base64 and img_right_base64:
     st.markdown(f"""
         <style>
@@ -100,28 +96,26 @@ with col2:
     st.title("Le conseiller enneigé") 
 st.write("Bienvenue ! Voici le conseiller enneigé qui connait toute la pile à lire du Livre enneigé et peut te conseiller.")
 
+# =======================================
+# 2. CONFIGURATION DE L'IA ET DE LA BASE
+# =======================================
 
-# ==========================================
-# ⚙️ 2. CONFIGURATION DE L'IA ET DE LA BASE
-# ==========================================
-# Mets ta clé API ici
-os.environ["MISTRAL_API_KEY"] = "O4sxEU9DYRsTmG8h4DpIIZ7jyIafz91v"
+os.environ["MISTRAL_API_KEY"] = "METTRE_UNE_CLE_API"
 
 # On utilise un cache pour ne pas recharger la base FAISS à chaque message
 @st.cache_resource
 def charger_ressources():
-    print("⏳ Chargement du modèle Multilingue et de la base FAISS...")
+    print("Chargement du modèle Multilingue et de la base FAISS")
     embeddings = HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
-    # Assure-toi que le nom du dossier correspond à celui créé à l'étape 2 !
     vectorstore = FAISS.load_local("faiss_index_bibliotheque", embeddings, allow_dangerous_deserialization=True)
     model = ChatMistralAI(model="mistral-small-latest", temperature=0)
     return vectorstore, model
 
 vectorstore, model = charger_ressources()
 
-# ==========================================
-# 🗂️ 3. SCHÉMAS ET OUTIL DE RECHERCHE
-# ==========================================
+# =================================
+# 3. SCHÉMAS ET OUTIL DE RECHERCHE
+# =================================
 class PlanRechercheLivre(BaseModel):
     query: str = Field(..., description="Le thème principal ou 'livre' par défaut.")
     auteur: Optional[str] = Field(None, description="Nom de l'auteur.")
@@ -181,14 +175,13 @@ def chercher_livres_filtres(query: str, auteur: Optional[str] = None, langue: Op
         return "Aucun livre pertinent n'a été trouvé pour ce sujet exact dans la bibliothèque."
     return "\n\n---\n\n".join(textes_formates)
 
-# ==========================================
-# 🧠 4. NOEUDS DU GRAPHE LANGGRAPH
-# ==========================================
+# ==============================
+# 4. NOEUDS DU GRAPHE LANGGRAPH
+# ==============================
 def planning_node(state: AgentState):
     question = state["question"]
     parser = PydanticOutputParser(pydantic_object=PlanRechercheLivre)
-    
-    # On a rendu les règles beaucoup plus strictes et explicites !
+
     prompt = f"""Ta SEULE tâche est de générer un objet JSON valide. Ne rédige AUCUN texte, AUCUN code. JUSTE LE JSON.
 Question de l'utilisateur : "{question}"
 
@@ -237,9 +230,9 @@ CONSIGNE : Si aucun livre, dis-le gentiment sans rien inventer. Sinon, présente
     except:
         return {"reponse_finale": "Désolé, problème lors de la rédaction."}
 
-# ==========================================
-# 🔗 5. COMPILATION DU GRAPHE (Cachée pour la performance)
-# ==========================================
+# =========================
+# 5. COMPILATION DU GRAPHE 
+# =========================
 @st.cache_resource
 def creer_graphe():
     graph = StateGraph(AgentState)
@@ -253,7 +246,7 @@ def creer_graphe():
     
     def validation_router(state: AgentState):
         if state.get("validation_errors"): return END 
-        return "chercher" # On saute l'humain ! On passe direct à la recherche.
+        return "chercher" 
         
     graph.add_conditional_edges("valider", validation_router)
     graph.add_edge("chercher", "repondre")
@@ -263,9 +256,9 @@ def creer_graphe():
 
 app_biblio = creer_graphe()
 
-# ==========================================
-# 💬 6. INTERFACE DE CHAT (Avec Validation en 2 étapes)
-# ==========================================
+# =======================================
+# 6. INTERFACE DE CHAT (Avec Validation)
+# =======================================
 st.write("---")
 
 AVATARS = {
@@ -273,7 +266,7 @@ AVATARS = {
     "assistant": "photo_agent.jpg"      
 }
 
-# --- INITIALISATION DE LA MÉMOIRE ---
+# INITIALISATION DE LA MÉMOIRE 
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "Bonjour ! Je suis ton bibliothécaire personnel. Quel genre de livre aimerais-tu lire ?"}
@@ -285,13 +278,13 @@ if "plan_temporaire" not in st.session_state:
 if "question_originale" not in st.session_state:
     st.session_state.question_originale = ""
 
-# --- AFFICHAGE DES ANCIENS MESSAGES ---
+# AFFICHAGE DES ANCIENS MESSAGES 
 for message in st.session_state.messages:
     # On ajoute l'avatar correspondant au rôle
     with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
         st.markdown(message["content"])
 
-# --- BOÎTE DE SAISIE ---
+# BOÎTE DE SAISIE
 if prompt := st.chat_input("Tape ta recherche ou réponds par oui/non..."):
     
     # Message de l'utilisateur avec son avatar
@@ -336,9 +329,9 @@ if prompt := st.chat_input("Tape ta recherche ou réponds par oui/non..."):
         st.session_state.plan_temporaire = None
         st.session_state.question_originale = ""
 
-    # ==========================================
+    # ======================================
     # CAS B : C'EST UNE NOUVELLE RECHERCHE
-    # ==========================================
+    # ======================================
     else:
         # Message de l'IA avec son avatar
         with st.chat_message("assistant", avatar=AVATARS["assistant"]):
